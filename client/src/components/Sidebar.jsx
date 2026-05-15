@@ -91,12 +91,6 @@ export default function Sidebar({ view, setView, history, onNewPRD, onLoadFromHi
         </div>
       )}
 
-      <div className="p-4 border-t border-surface-border mt-auto">
-        <div className="flex items-center gap-2 text-2xs text-ink-muted">
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          <span>Powered by Claude Sonnet 4.6</span>
-        </div>
-      </div>
     </aside>
   );
 }
