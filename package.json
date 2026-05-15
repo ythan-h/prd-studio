@@ -1,0 +1,18 @@
+{
+  "name": "prd-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "PRD Studio — AI Product Manager (Vercel deployment root)",
+  "scripts": {
+    "build": "cd client && npm install && npm run build",
+    "dev": "cd client && npm run dev",
+    "vercel-build": "cd client && npm install && npm run build"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
