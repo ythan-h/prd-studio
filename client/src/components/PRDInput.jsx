@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowRight, Zap, FileText, Users, BarChart2, Clock } from 'lucide-react';
+import { ArrowRight, Clock } from 'lucide-react';
 
 const TEMPLATES = [
   {
@@ -27,13 +27,6 @@ const TEMPLATES = [
     icon: '🔧',
     idea: 'An internal vendor management platform for mid-size companies to consolidate contract renewals, track software spend, benchmark pricing against market rates, and automate renewal negotiation workflows.',
   },
-];
-
-const FEATURE_PILLS = [
-  { icon: FileText, label: '12-section PRD' },
-  { icon: Users, label: 'Persona mapping' },
-  { icon: BarChart2, label: 'KPI framework' },
-  { icon: Zap, label: 'PM critique mode' },
 ];
 
 export default function PRDInput({ onGenerate, error, view, history, onLoadFromHistory }) {
@@ -85,18 +78,6 @@ export default function PRDInput({ onGenerate, error, view, history, onLoadFromH
           <p className="text-ink-secondary text-base max-w-md mx-auto text-balance">
             Describe your product idea. Our AI PM generates a structured, critique-ready PRD in seconds.
           </p>
-        </div>
-
-        <div
-          className="flex gap-4 justify-center mb-10 animate-fade-up"
-          style={{ animationDelay: '0.1s', animationFillMode: 'backwards' }}
-        >
-          {FEATURE_PILLS.map(({ icon: Icon, label }) => (
-            <div key={label} className="flex items-center gap-1.5 text-xs text-ink-muted">
-              <Icon size={13} className="text-brand-500" />
-              {label}
-            </div>
-          ))}
         </div>
 
         <form

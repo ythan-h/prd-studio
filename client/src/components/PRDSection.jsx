@@ -7,20 +7,33 @@ export function PRDSection({ title, icon: Icon, children, defaultOpen = true, de
 
   const handleCopy = useCallback(async (e) => {
     e.stopPropagation();
+    e.preventDefault();
     const text = document.getElementById(`section-${title}`)?.innerText || '';
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
   }, [title]);
+
+  const toggle = useCallback(() => setOpen(o => !o), []);
 
   return (
     <div
       className="glass-card overflow-hidden animate-fade-up"
       style={{ animationDelay: `${delay}s`, animationFillMode: 'backwards' }}
     >
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-5 py-4 hover:bg-surface-hover/50 transition-colors duration-150 group"
+      <div
+        onClick={toggle}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            toggle();
+          }
+        }}
+        className="w-full flex items-center justify-between px-5 py-4 hover:bg-surface-hover/50 transition-colors duration-150 group cursor-pointer select-none focus:outline-none focus:bg-surface-hover/50"
       >
         <div className="flex items-center gap-3">
           <div className="w-7 h-7 rounded-lg bg-brand-gradient-subtle border border-brand-500/15 flex items-center justify-center flex-shrink-0">
@@ -28,10 +41,11 @@ export function PRDSection({ title, icon: Icon, children, defaultOpen = true, de
           </div>
           <span className="font-semibold text-sm text-ink-primary">{title}</span>
         </div>
-        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+        <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={handleCopy}
-            className="btn-ghost"
+            className="btn-ghost opacity-0 group-hover:opacity-100 transition-opacity duration-150"
             title="Copy section"
           >
             {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
@@ -42,11 +56,7 @@ export function PRDSection({ title, icon: Icon, children, defaultOpen = true, de
             className={`text-ink-muted transition-transform duration-200 ${open ? '' : '-rotate-90'}`}
           />
         </div>
-        <ChevronDown
-          size={15}
-          className={`text-ink-muted transition-transform duration-200 group-hover:opacity-0 opacity-100 absolute right-5 ${open ? '' : '-rotate-90'}`}
-        />
-      </button>
+      </div>
 
       {open && (
         <div id={`section-${title}`} className="px-5 pb-5 border-t border-surface-border/50">

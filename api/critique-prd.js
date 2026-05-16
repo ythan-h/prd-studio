@@ -5,11 +5,26 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { prd, mode, critique } = req.body || {};
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.error('[critique-prd] ANTHROPIC_API_KEY is not set');
+    return res.status(500).json({
+      error: 'Server misconfigured: ANTHROPIC_API_KEY is not set. Add it in Vercel → Settings → Environment Variables, then redeploy.',
+    });
+  }
+
+  let body = req.body;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch { body = {}; }
+  }
+  const { prd, mode, critique } = body || {};
 
   if (!prd || typeof prd !== 'object') {
     return res.status(400).json({ error: 'Valid PRD data is required' });
   }
+
+  const startedAt = Date.now();
+  const action = mode === 'improve' ? 'improve' : 'critique';
+  console.log(`[critique-prd] Starting ${action} for: "${prd.title}"`);
 
   try {
     if (mode === 'improve') {
@@ -17,20 +32,28 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Critique data is required for improvement mode' });
       }
       const improved = await improvePRD(prd, critique);
+      console.log(`[critique-prd] Improve done in ${Date.now() - startedAt}ms`);
       return res.status(200).json({ success: true, prd: improved });
     }
 
     const result = await critiquePRD(prd);
+    console.log(`[critique-prd] Critique done in ${Date.now() - startedAt}ms — score: ${result.overall_score}`);
     return res.status(200).json({ success: true, critique: result });
   } catch (error) {
-    console.error('Critique/improve error:', error.message);
+    console.error(`[critique-prd] Failed ${action} after ${Date.now() - startedAt}ms:`, error.message, error.stack);
 
+    if (error.status === 401) {
+      return res.status(500).json({ error: 'Invalid ANTHROPIC_API_KEY. Verify it in Vercel env vars.' });
+    }
     if (error.status === 429) {
       return res.status(429).json({ error: 'Rate limit reached. Please wait a moment and try again.' });
     }
+    if (error instanceof SyntaxError) {
+      return res.status(502).json({ error: 'AI returned malformed JSON. Please try again.' });
+    }
 
     return res.status(500).json({
-      error: mode === 'improve' ? 'Failed to improve PRD.' : 'Failed to critique PRD.',
+      error: `Failed to ${action} PRD: ${error.message || 'Unknown error'}`,
     });
   }
 }
