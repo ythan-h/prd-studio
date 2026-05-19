@@ -1,7 +1,7 @@
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-const PRIMARY_MODEL = process.env.OPENROUTER_MODEL || 'deepseek/deepseek-chat-v3-0324:free';
-const FALLBACK_MODEL = 'meta-llama/llama-3.3-70b-instruct:free';
+const PRIMARY_MODEL = process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free';
+const FALLBACK_MODEL = 'google/gemini-2.0-flash-exp:free';
 
 function parseJSON(text) {
   const cleaned = text
@@ -64,7 +64,7 @@ async function callWithFallback({ system, user, maxTokens }) {
   try {
     return await callModel({ system, user, maxTokens, model: PRIMARY_MODEL });
   } catch (err) {
-    if (err.status === 429 || err.status === 503) {
+    if (err.status === 429 || err.status === 503 || err.status === 404) {
       console.warn(`[aiService] Primary model ${PRIMARY_MODEL} failed (${err.status}), trying fallback ${FALLBACK_MODEL}`);
       return await callModel({ system, user, maxTokens, model: FALLBACK_MODEL });
     }
