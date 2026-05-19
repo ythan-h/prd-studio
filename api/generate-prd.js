@@ -5,10 +5,10 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error('[generate-prd] ANTHROPIC_API_KEY is not set');
+  if (!process.env.OPENROUTER_API_KEY) {
+    console.error('[generate-prd] OPENROUTER_API_KEY is not set');
     return res.status(500).json({
-      error: 'Server misconfigured: ANTHROPIC_API_KEY is not set. Add it in Vercel → Settings → Environment Variables, then redeploy.',
+      error: 'Server misconfigured: OPENROUTER_API_KEY is not set. Add it in Vercel → Settings → Environment Variables, then redeploy.',
     });
   }
 
@@ -37,14 +37,14 @@ export default async function handler(req, res) {
     console.error(`[generate-prd] Failed after ${Date.now() - startedAt}ms:`, error.message, error.stack);
 
     if (error.status === 401) {
-      return res.status(500).json({ error: 'Invalid ANTHROPIC_API_KEY. Verify it in Vercel env vars.' });
+      return res.status(500).json({ error: 'Invalid OPENROUTER_API_KEY. Verify it in Vercel env vars.' });
     }
     if (error.status === 429) {
-      return res.status(429).json({ error: 'Rate limit reached. Please wait a moment and try again.' });
+      return res.status(429).json({ error: 'Rate limit reached on the free tier. Wait 60s, or try a different free model in OPENROUTER_MODEL.' });
     }
-    if (error.status === 400 && /credit balance/i.test(error.message || '')) {
+    if (error.status === 402) {
       return res.status(402).json({
-        error: 'Your Anthropic account has no credits. Add credits at console.anthropic.com/settings/billing to use the app.',
+        error: 'Credit balance issue on OpenRouter. Free tier allows 50 req/day — try again tomorrow or add $10 lifetime credits at openrouter.ai for 1000 req/day.',
       });
     }
     if (error instanceof SyntaxError) {

@@ -1,6 +1,7 @@
-import Anthropic from '@anthropic-ai/sdk';
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const PRIMARY_MODEL = process.env.OPENROUTER_MODEL || 'deepseek/deepseek-chat-v3-0324:free';
+const FALLBACK_MODEL = 'meta-llama/llama-3.3-70b-instruct:free';
 
 function parseJSON(text) {
   const cleaned = text
@@ -8,23 +9,79 @@ function parseJSON(text) {
     .replace(/^```\s*/m, '')
     .replace(/```\s*$/m, '')
     .trim();
+
+  const first = cleaned.indexOf('{');
+  const last = cleaned.lastIndexOf('}');
+  if (first !== -1 && last !== -1 && last > first) {
+    return JSON.parse(cleaned.slice(first, last + 1));
+  }
   return JSON.parse(cleaned);
+}
+
+async function callModel({ system, user, maxTokens = 8000, model = PRIMARY_MODEL }) {
+  if (!process.env.OPENROUTER_API_KEY) {
+    const err = new Error('OPENROUTER_API_KEY is not set');
+    err.status = 401;
+    throw err;
+  }
+
+  const res = await fetch(OPENROUTER_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': process.env.APP_URL || 'https://prd-studio.vercel.app',
+      'X-Title': 'PRD Studio',
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      max_tokens: maxTokens,
+      temperature: 0.7,
+      response_format: { type: 'json_object' },
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    const err = new Error(`OpenRouter ${res.status}: ${text.slice(0, 500)}`);
+    err.status = res.status;
+    throw err;
+  }
+
+  const data = await res.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error('OpenRouter returned empty content: ' + JSON.stringify(data).slice(0, 300));
+  }
+  return content;
+}
+
+async function callWithFallback({ system, user, maxTokens }) {
+  try {
+    return await callModel({ system, user, maxTokens, model: PRIMARY_MODEL });
+  } catch (err) {
+    if (err.status === 429 || err.status === 503) {
+      console.warn(`[aiService] Primary model ${PRIMARY_MODEL} failed (${err.status}), trying fallback ${FALLBACK_MODEL}`);
+      return await callModel({ system, user, maxTokens, model: FALLBACK_MODEL });
+    }
+    throw err;
+  }
 }
 
 export async function generatePRD(idea) {
   const today = new Date().toISOString().split('T')[0];
 
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 8000,
+  const content = await callWithFallback({
+    maxTokens: 8000,
     system: `You are a Senior Staff Product Manager at a top-tier tech company (FAANG level).
 You write precise, opinionated, and actionable PRDs that engineering teams can immediately act on.
 Your PRDs are known for: specific measurable goals, realistic MVP scoping, and surfacing edge cases others miss.
-Always respond with valid JSON only — no markdown, no preamble.`,
-    messages: [
-      {
-        role: 'user',
-        content: `Generate a comprehensive, production-quality PRD for this product idea.
+You MUST respond with valid JSON only — no markdown code blocks, no preamble, no explanation.`,
+    user: `Generate a comprehensive, production-quality PRD for this product idea.
 
 Product Idea: ${idea}
 
@@ -47,40 +104,32 @@ Return a JSON object with EXACTLY this structure. Be specific, realistic, and op
       "tech_savviness": "Low|Medium|High"
     }
   ],
-  "goals": [
-    "Specific, measurable goal with a target (e.g. Reduce X by 30% within 6 months)",
-    "Another specific goal",
-    "Another specific goal"
-  ],
-  "non_goals": [
-    "Explicit exclusion with brief rationale",
-    "Another explicit exclusion",
-    "Another explicit exclusion"
-  ],
+  "goals": ["Specific measurable goal with a target", "Another", "Another"],
+  "non_goals": ["Explicit exclusion with rationale", "Another", "Another"],
   "user_stories": [
     {
       "id": "US-001",
       "as_a": "specific persona type",
       "i_want": "specific action or capability",
-      "so_that": "concrete business/personal benefit",
+      "so_that": "concrete benefit",
       "priority": "P0|P1|P2",
-      "acceptance_criteria": ["measurable criterion 1", "measurable criterion 2", "measurable criterion 3"]
+      "acceptance_criteria": ["criterion 1", "criterion 2", "criterion 3"]
     }
   ],
   "functional_requirements": [
     {
       "id": "FR-001",
       "title": "Feature name",
-      "description": "Detailed technical/product description of the feature",
+      "description": "Detailed description",
       "priority": "P0|P1|P2",
-      "user_impact": "How this directly impacts user value",
+      "user_impact": "How this impacts user value",
       "dependencies": ["any dependency"]
     }
   ],
   "non_functional_requirements": [
     {
       "category": "Performance|Security|Scalability|Reliability|Accessibility|Compliance",
-      "requirement": "Specific requirement statement",
+      "requirement": "Specific requirement",
       "target": "Measurable target (e.g. p99 < 200ms)"
     }
   ],
@@ -89,7 +138,7 @@ Return a JSON object with EXACTLY this structure. Be specific, realistic, and op
     "metrics": [
       {
         "name": "Metric name",
-        "description": "What it measures and why it matters",
+        "description": "What it measures",
         "target": "Specific target with timeframe",
         "type": "Acquisition|Activation|Retention|Revenue|Referral",
         "measurement": "How to measure it"
@@ -97,11 +146,7 @@ Return a JSON object with EXACTLY this structure. Be specific, realistic, and op
     ]
   },
   "edge_cases": [
-    {
-      "scenario": "Specific edge case description",
-      "likelihood": "Low|Medium|High",
-      "handling": "How the system should handle it"
-    }
+    { "scenario": "Specific edge case", "likelihood": "Low|Medium|High", "handling": "How to handle it" }
   ],
   "risks": [
     {
@@ -114,60 +159,42 @@ Return a JSON object with EXACTLY this structure. Be specific, realistic, and op
     }
   ],
   "mvp_scope": [
-    {
-      "feature": "Feature name",
-      "rationale": "Why this is in MVP vs. later",
-      "effort": "S|M|L|XL",
-      "value": "Specific user value delivered"
-    }
+    { "feature": "Feature name", "rationale": "Why in MVP vs later", "effort": "S|M|L|XL", "value": "User value" }
   ],
   "future_roadmap": [
-    {
-      "phase": "Phase 2 — Q3 2026",
-      "theme": "Phase theme",
-      "features": ["feature 1", "feature 2", "feature 3"],
-      "rationale": "Why this phase comes after MVP"
-    }
+    { "phase": "Phase 2 — Q3 2026", "theme": "Phase theme", "features": ["feature 1", "feature 2"], "rationale": "Why this phase" }
   ],
   "open_questions": [
-    {
-      "question": "Specific unresolved question",
-      "owner": "Role responsible for answering (e.g. Legal, Engineering, Design)",
-      "deadline": "When this needs to be answered"
-    }
+    { "question": "Specific question", "owner": "Role responsible", "deadline": "When needed" }
   ]
 }
 
 Requirements:
-- Generate exactly 2-3 personas
-- Generate exactly 6-8 user stories across P0/P1/P2
-- Generate exactly 6-8 functional requirements
-- Generate exactly 4-5 non-functional requirements
-- Generate exactly 5-6 KPI metrics
-- Generate exactly 4-6 edge cases
-- Generate exactly 3-4 risks
-- Generate exactly 5-7 MVP features
-- Generate exactly 2-3 roadmap phases
-- Generate exactly 3-4 open questions`,
-      },
-    ],
+- Generate 2-3 personas
+- Generate 6-8 user stories across P0/P1/P2
+- Generate 6-8 functional requirements
+- Generate 4-5 non-functional requirements
+- Generate 5-6 KPI metrics
+- Generate 4-6 edge cases
+- Generate 3-4 risks
+- Generate 5-7 MVP features
+- Generate 2-3 roadmap phases
+- Generate 3-4 open questions
+
+Respond with ONLY the JSON object. No markdown, no preamble.`,
   });
 
-  return parseJSON(message.content[0].text);
+  return parseJSON(content);
 }
 
 export async function critiquePRD(prd) {
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 4000,
+  const content = await callWithFallback({
+    maxTokens: 4000,
     system: `You are a VP of Product at a top-tier tech company doing a formal PRD review before engineering kickoff.
 You are known for being thorough, direct, and catching issues others miss.
 Your job is to find gaps, challenge assumptions, and ensure the team doesn't build the wrong thing.
-Be specific — never vague. Always respond with valid JSON only.`,
-    messages: [
-      {
-        role: 'user',
-        content: `Review this PRD critically. Your review will determine if engineering can start.
+Be specific — never vague. You MUST respond with valid JSON only — no markdown, no preamble.`,
+    user: `Review this PRD critically. Your review will determine if engineering can start.
 
 PRD:
 ${JSON.stringify(prd, null, 2)}
@@ -179,78 +206,44 @@ Return a JSON object with EXACTLY this structure:
   "score_rationale": "2 sentences explaining the score",
   "summary": "3 sentences: what this PRD does well, what it's missing, and your overall stance",
   "assumptions_critique": [
-    {
-      "assumption": "The specific assumption being made in the PRD",
-      "concern": "Why this assumption is dangerous or unvalidated",
-      "recommendation": "How to validate or de-risk this assumption"
-    }
+    { "assumption": "...", "concern": "...", "recommendation": "..." }
   ],
   "missing_requirements": [
-    {
-      "area": "Area lacking coverage",
-      "gap": "Specific gap in the PRD",
-      "importance": "High|Medium|Low",
-      "suggestion": "Exactly what to add"
-    }
+    { "area": "...", "gap": "...", "importance": "High|Medium|Low", "suggestion": "..." }
   ],
   "ux_risks": [
-    {
-      "risk": "Specific UX risk",
-      "affected_users": "Which personas are affected",
-      "impact": "What breaks or frustrates users",
-      "mitigation": "Design or product solution"
-    }
+    { "risk": "...", "affected_users": "...", "impact": "...", "mitigation": "..." }
   ],
   "engineering_risks": [
-    {
-      "risk": "Specific technical risk",
-      "impact": "Engineering consequence",
-      "mitigation": "Technical approach or spike needed"
-    }
+    { "risk": "...", "impact": "...", "mitigation": "..." }
   ],
-  "strengths": [
-    "Specific thing this PRD does well",
-    "Another specific strength",
-    "Another specific strength"
-  ],
+  "strengths": ["...", "...", "..."],
   "improvements": [
-    {
-      "priority": "High|Medium|Low",
-      "area": "Specific area to improve",
-      "suggestion": "Actionable, specific improvement"
-    }
+    { "priority": "High|Medium|Low", "area": "...", "suggestion": "..." }
   ],
   "verdict": "REVISE",
-  "verdict_reason": "2-3 sentence explanation of the verdict — what needs to happen before this can be approved or must be rejected",
-  "next_steps": [
-    "Concrete, assigned action item 1",
-    "Concrete, assigned action item 2",
-    "Concrete, assigned action item 3"
-  ]
+  "verdict_reason": "2-3 sentences explaining the verdict",
+  "next_steps": ["action 1", "action 2", "action 3"]
 }
 
 Scoring guide: 85+ = APPROVE, 60-84 = REVISE, below 60 = REJECT.
 The verdict MUST match the score range.
-Generate 3-5 items for each critique section.`,
-      },
-    ],
+Generate 3-5 items for each critique section.
+
+Respond with ONLY the JSON object. No markdown, no preamble.`,
   });
 
-  return parseJSON(message.content[0].text);
+  return parseJSON(content);
 }
 
 export async function improvePRD(prd, critique) {
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 8000,
+  const content = await callWithFallback({
+    maxTokens: 8000,
     system: `You are a Senior Staff Product Manager revising your PRD after VP feedback.
 You address every HIGH priority item from the critique completely.
 You improve specificity, close gaps, and tighten scope.
-Always respond with valid JSON only.`,
-    messages: [
-      {
-        role: 'user',
-        content: `Revise and improve this PRD based on the VP critique. Address all HIGH priority items and missing requirements.
+You MUST respond with valid JSON only — no markdown, no preamble.`,
+    user: `Revise and improve this PRD based on the VP critique. Address all HIGH priority items and missing requirements.
 
 Original PRD:
 ${JSON.stringify(prd, null, 2)}
@@ -265,10 +258,10 @@ Make every section measurably better:
 - Add edge cases that were missed
 - Improve acceptance criteria for user stories
 - Address technical and UX risks in the requirements
-The improved PRD should score at least 10-15 points higher than the original.`,
-      },
-    ],
+The improved PRD should score at least 10-15 points higher than the original.
+
+Respond with ONLY the JSON object. No markdown, no preamble.`,
   });
 
-  return parseJSON(message.content[0].text);
+  return parseJSON(content);
 }
