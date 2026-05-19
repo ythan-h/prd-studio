@@ -42,6 +42,11 @@ export default async function handler(req, res) {
     if (error.status === 429) {
       return res.status(429).json({ error: 'Rate limit reached. Please wait a moment and try again.' });
     }
+    if (error.status === 400 && /credit balance/i.test(error.message || '')) {
+      return res.status(402).json({
+        error: 'Your Anthropic account has no credits. Add credits at console.anthropic.com/settings/billing to use the app.',
+      });
+    }
     if (error instanceof SyntaxError) {
       return res.status(502).json({ error: 'AI returned malformed JSON. Please try again.' });
     }
