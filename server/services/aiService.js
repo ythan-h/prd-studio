@@ -22,32 +22,50 @@ function parseJSON(text) {
   return JSON.parse(cleaned);
 }
 
-async function callModel({ system, user, maxTokens = 8000, model = MODEL_CHAIN[0] }) {
+const PER_MODEL_TIMEOUT_MS = 25_000;
+
+async function callModel({ system, user, maxTokens = 5000, model = MODEL_CHAIN[0] }) {
   if (!process.env.OPENROUTER_API_KEY) {
     const err = new Error('OPENROUTER_API_KEY is not set');
     err.status = 401;
     throw err;
   }
 
-  const res = await fetch(OPENROUTER_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': process.env.APP_URL || 'https://prd-studio.vercel.app',
-      'X-Title': 'PRD Studio',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-      max_tokens: maxTokens,
-      temperature: 0.7,
-      response_format: { type: 'json_object' },
-    }),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PER_MODEL_TIMEOUT_MS);
+
+  let res;
+  try {
+    res = await fetch(OPENROUTER_URL, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': process.env.APP_URL || 'https://prd-studio.vercel.app',
+        'X-Title': 'PRD Studio',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        max_tokens: maxTokens,
+        temperature: 0.7,
+        response_format: { type: 'json_object' },
+      }),
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      const e = new Error(`Model ${model} exceeded ${PER_MODEL_TIMEOUT_MS}ms timeout`);
+      e.status = 504;
+      throw e;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) {
     const text = await res.text();
@@ -71,7 +89,7 @@ async function callWithFallback({ system, user, maxTokens }) {
       return await callModel({ system, user, maxTokens, model });
     } catch (err) {
       lastErr = err;
-      const retryable = err.status === 429 || err.status === 503 || err.status === 404;
+      const retryable = err.status === 429 || err.status === 503 || err.status === 404 || err.status === 504;
       if (!retryable) throw err;
       console.warn(`[aiService] Model ${model} failed (${err.status}), trying next in chain`);
     }
@@ -83,7 +101,7 @@ export async function generatePRD(idea) {
   const today = new Date().toISOString().split('T')[0];
 
   const content = await callWithFallback({
-    maxTokens: 8000,
+    maxTokens: 5000,
     system: `You are a Senior Staff Product Manager at a top-tier tech company (FAANG level).
 You write precise, opinionated, and actionable PRDs that engineering teams can immediately act on.
 Your PRDs are known for: specific measurable goals, realistic MVP scoping, and surfacing edge cases others miss.
@@ -245,7 +263,7 @@ Respond with ONLY the JSON object. No markdown, no preamble.`,
 
 export async function improvePRD(prd, critique) {
   const content = await callWithFallback({
-    maxTokens: 8000,
+    maxTokens: 5000,
     system: `You are a Senior Staff Product Manager revising your PRD after VP feedback.
 You address every HIGH priority item from the critique completely.
 You improve specificity, close gaps, and tighten scope.
